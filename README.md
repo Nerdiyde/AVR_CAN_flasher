@@ -36,7 +36,7 @@ The hex file needs to be stored in the SPIFFS of your ESP32. Please see https://
 * Standard CAN frame format
 * Target MCU reset via reset pin ()
 
-##TODO
+## TODO
 * Test Extended frame format
 * Integrate alternative "progress bar" for status report via serial
 
