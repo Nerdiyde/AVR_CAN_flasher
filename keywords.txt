@@ -1,0 +1,20 @@
+# Syntax Highlighting for the AVR CAN flasher library
+
+#====================
+# Datatypes (KEYWORD1)
+
+acf_can_message	KEYWORD1
+
+#====================
+# Methods and Functions (KEYWORD2)
+
+acf_start_flash_process	KEYWORD2
+acf_handle_can_msg KEYWORD2
+
+#====================
+# Instances (KEYWORD2)
+
+ACF	KEYWORD2
+
+#====================
+# Constants (LITERAL1)

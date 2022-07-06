@@ -1,0 +1,22 @@
+{
+    "name": "AVR CAN flasher",
+    "version": "0.1.0",
+    "description": "An arduino library to flash a hex file to an AVR node for flashing.",
+    "keywords": "AVR, booloader, CAN, ESP32",
+    "repository":
+    {
+        "type": "git",
+        "url": ""
+    },
+    "authors":
+    {
+        "name": "Fabian Steppat",
+        "email": "info@nerdiy.de",
+        "url": "https://nerdiy.de",
+        "maintainer": "true"
+    },
+    "license": "CC BY-NC-SA 4.0",
+    "homepage": "https://nerdiy.de/",
+    "frameworks": "*",
+    "platforms": "*"
+  }
