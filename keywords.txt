@@ -8,14 +8,15 @@ acf_can_message	KEYWORD1
 #====================
 # Methods and Functions (KEYWORD2)
 
-acf_start_flash_process	KEYWORD2
-acf_handle_can_msg KEYWORD2
-acf_convert_to_hex_string KEYWORD2
-acf_stop_flash_process KEYWORD2
-acf_wait_for_bootloader_response_duration KEYWORD2
-acf_bootloader_responded KEYWORD2
-acf_flash_process_finished KEYWORD2
-acf_verification_finished KEYWORD2
+start_flash_process	KEYWORD2
+handle_can_msg KEYWORD2
+convert_to_hex_string KEYWORD2
+stop_flash_process KEYWORD2
+wait_for_bootloader_response_duration KEYWORD2
+bootloader_responded KEYWORD2
+flash_process_finished KEYWORD2
+verification_finished KEYWORD2
+handle KEYWORD2
 
 #====================
 # Instances (KEYWORD2)

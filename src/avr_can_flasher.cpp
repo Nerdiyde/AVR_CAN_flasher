@@ -28,36 +28,38 @@ ACF::ACF(void (*cs_function_pointer)(uint32_t, uint8_t *, uint8_t))
     this->can_send_function_pointer = cs_function_pointer;
 }
 
-boolean ACF::acf_start_flash_process(String file_string,
-                                     uint32_t mcuId,
-                                     String partno,
-                                     uint32_t reset_can_id,
-                                     String reset_can_message,
-                                     boolean doErase,
-                                     uint16_t doRead,
-                                     boolean doReset,
-                                     boolean doVerify,
-                                     boolean forceFlashing,
-                                     uint32_t canIdRemote,
-                                     uint32_t canIdMcu,
-                                     boolean printSimpleProgress)
+boolean ACF::start_flash_process(String file_string,
+                                 uint32_t mcuId,
+                                 String partno,
+                                 uint32_t reset_can_id,
+                                 String reset_can_message,
+                                 boolean doErase,
+                                 uint16_t doRead,
+                                 boolean doReset,
+                                 boolean doVerify,
+                                 boolean forceFlashing,
+                                 uint32_t canIdRemote,
+                                 uint32_t canIdMcu,
+                                 boolean printSimpleProgress,
+                                 uint32_t ping)
 {
     // This is done to clear the (possible) loaded variable values.
     // This avoids crashes on the ESP32 in case a flash start process is started while another one was already prepared.
-    this->acf_stop_flash_process();
+    this->stop_flash_process();
 
     this->mcuId = mcuId;
     this->doErase = doErase;
     this->doRead = doRead;
     this->doVerify = this->doRead ? false : doVerify; // if we are just reading, we cannot verify
     this->state = ACF_STATE_INIT;
-    this->deviceSignature = this->acf_get_device_signature(partno);
+    this->deviceSignature = this->get_device_signature(partno);
     this->partno = partno;
     this->can_id_remote_to_mcu = canIdRemote;
     this->can_id_mcu_to_remote = canIdMcu;
     this->forceFlashing = forceFlashing;
     this->file_string = file_string;
     this->printSimpleProgress = printSimpleProgress;
+    this->pingInterval = ping;
 
     Serial.println("Flash process started with the following settings:");
     Serial.print("\tmcuId: ");
@@ -196,21 +198,21 @@ boolean ACF::acf_start_flash_process(String file_string,
 #endif
 
             // get the byte_count value of the current line. See https://en.wikipedia.org/wiki/Intel_HEX for mor information about the structure of an intel hex file.
-            this->hexMapLines[line].byte_count = this->acf_convert_hex_string_to_int(current_line.substr(1, 2).c_str());
+            this->hexMapLines[line].byte_count = this->convert_hex_string_to_int(current_line.substr(1, 2).c_str());
 #ifdef DETAILED_OUTPUT_HEX_FILE_READING
             Serial.print("\thexMapLines[line].byte_count: 0x");
             Serial.println(this->hexMapLines[line].byte_count, HEX);
 #endif
 
             // get the address value of the current line.
-            this->hexMapLines[line].address = this->acf_convert_hex_string_to_int(current_line.substr(3, 4).c_str());
+            this->hexMapLines[line].address = this->convert_hex_string_to_int(current_line.substr(3, 4).c_str());
 #ifdef DETAILED_OUTPUT_HEX_FILE_READING
             Serial.print("\thexMapLines[line].address: 0x");
             Serial.println(this->hexMapLines[line].address, HEX);
 #endif
 
             // get the record_type value of the current line.
-            this->hexMapLines[line].record_type = this->acf_convert_hex_string_to_int(current_line.substr(7, 2).c_str());
+            this->hexMapLines[line].record_type = this->convert_hex_string_to_int(current_line.substr(7, 2).c_str());
 #ifdef DETAILED_OUTPUT_HEX_FILE_READING
             Serial.print("\thexMapLines[line].record_type: 0x");
             Serial.println(this->hexMapLines[line].record_type, HEX);
@@ -219,11 +221,11 @@ boolean ACF::acf_start_flash_process(String file_string,
             // get the payload data values of the current line and insert it into the byte array of "intel_hex_map_line" struct.
             for (uint8_t data_byte = 0; data_byte < this->hexMapLines[line].byte_count; data_byte++)
             {
-                this->hexMapLines[line].data[data_byte] = this->acf_convert_hex_string_to_int(current_line.substr(9 + 2 * data_byte, 2).c_str());
+                this->hexMapLines[line].data[data_byte] = this->convert_hex_string_to_int(current_line.substr(9 + 2 * data_byte, 2).c_str());
             }
 
             // get the checksum value of the current line and check that it is valid.
-            this->hexMapLines[line].checksum = this->acf_convert_hex_string_to_int(current_line.substr(current_line.length() - 3, 2).c_str());
+            this->hexMapLines[line].checksum = this->convert_hex_string_to_int(current_line.substr(current_line.length() - 3, 2).c_str());
 #ifdef DETAILED_OUTPUT_HEX_FILE_READING
             Serial.print("\thexMapLines[line].checksum: 0x");
             Serial.println(this->hexMapLines[line].checksum, HEX);
@@ -237,7 +239,7 @@ boolean ACF::acf_start_flash_process(String file_string,
                 Serial.println(this->hexMapLines[line].data[data_byte], HEX);
             }
 #endif
-            if (!this->acf_intel_hex_checksum_is_valid(current_line.c_str()))
+            if (!this->intel_hex_checksum_is_valid(current_line.c_str()))
             {
                 Serial.print("Error during reading of the input file. Checksum of line ");
                 Serial.print(line);
@@ -297,13 +299,22 @@ boolean ACF::acf_start_flash_process(String file_string,
             return;
         }*/
 
-        this->acf_can_send_data(reset_can_id, reset_can_message, 8);
+        this->can_send_data(reset_can_id, reset_can_message, 8);
 
         Serial.println("Reset message send to the MCU.");
     }
 
+    // prepare sending of ping messages if a ping duration is defined
+    if (this->pingInterval)
+    {
+        Serial.print("Sending of ping messages every ");
+        Serial.print(this->pingInterval);
+        Serial.println(" ms active.");
+        pingLastSend = 0;
+    }
+
     Serial.print("Waiting for bootloader start message for MCU ID ");
-    Serial.print(this->acf_convert_to_hex_string(this->mcuId, 4));
+    Serial.print(this->convert_to_hex_string(this->mcuId, 4));
     Serial.println(" ...");
 
     this->waitingForBootloaderDuration = millis();
@@ -311,7 +322,7 @@ boolean ACF::acf_start_flash_process(String file_string,
     return true;
 }
 
-void ACF::acf_stop_flash_process()
+void ACF::stop_flash_process()
 {
     free(this->hexMapLines);
     this->mcuId = 0;
@@ -321,8 +332,8 @@ void ACF::acf_stop_flash_process()
     this->forceFlashing = false;
     this->state = ACF_STATE_INIT;
     this->deviceSignature = 0;
-    this->curAddr = 0;      
-    this->flashStartTs = 0; 
+    this->curAddr = 0;
+    this->flashStartTs = 0;
     this->partno = "";
     this->can_id_remote_to_mcu = 0;
     this->can_id_mcu_to_remote = 0;
@@ -338,10 +349,10 @@ void ACF::acf_stop_flash_process()
     this->verificationFinished = false;
 }
 
-boolean ACF::acf_handle_can_msg(acf_can_message msg)
+boolean ACF::handle_can_msg(acf_can_message msg)
 {
 #ifdef DETAILED_OUTPUT_CAN_MESSAGE_RECEIVE
-    Serial.println("Data received in acf_handle_can_msg");
+    Serial.println("Data received in handle_can_msg");
     Serial.print("\tID: ");
     Serial.println(msg.id, HEX);
     Serial.print("\tcount: ");
@@ -407,15 +418,15 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
             {
                 Serial.println("Error: Got bootloader start message but device signature missmatched!");
                 Serial.println("Expected:");
-                Serial.println(this->acf_convert_to_hex_string(devSig1));
-                Serial.println(this->acf_convert_to_hex_string(devSig2));
-                Serial.println(this->acf_convert_to_hex_string(devSig3));
+                Serial.println(this->convert_to_hex_string(devSig1));
+                Serial.println(this->convert_to_hex_string(devSig2));
+                Serial.println(this->convert_to_hex_string(devSig3));
                 Serial.print("for ");
                 Serial.print(this->partno);
                 Serial.println(" got:");
-                Serial.println(this->acf_convert_to_hex_string(msg.data[4]));
-                Serial.println(this->acf_convert_to_hex_string(msg.data[5]));
-                Serial.println(this->acf_convert_to_hex_string(msg.data[6]));
+                Serial.println(this->convert_to_hex_string(msg.data[4]));
+                Serial.println(this->convert_to_hex_string(msg.data[5]));
+                Serial.println(this->convert_to_hex_string(msg.data[6]));
                 return false;
             }
 
@@ -423,9 +434,9 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
             if (msg.data[7] != ACF_BOOTLOADER_CMD_VERSION)
             {
                 Serial.print("ERROR: Bootloader command version of MCU ");
-                Serial.print(this->acf_convert_to_hex_string(msg.data[7]));
+                Serial.print(this->convert_to_hex_string(msg.data[7]));
                 Serial.print(" does not match the version expected by this flash app ");
-                Serial.print(this->acf_convert_to_hex_string(ACF_BOOTLOADER_CMD_VERSION));
+                Serial.print(this->convert_to_hex_string(ACF_BOOTLOADER_CMD_VERSION));
                 if (this->forceFlashing)
                 {
                     Serial.println(". You forced flashing anyways. This may lead to an stupid result...");
@@ -451,7 +462,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                 (uint8_t)this->deviceSignature,
                 0x00};
 
-            this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+            this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
         }
         break;
 
@@ -474,7 +485,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                     0x00,
                     0x00};
 
-                this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+                this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
             }
             else if (this->doErase)
             {
@@ -489,7 +500,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                     0x00,
                     0x00};
 
-                this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+                this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
 
                 this->doErase = false;
             }
@@ -498,7 +509,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                 Serial.println("Got flash ready message, begin flashing ...");
                 // Serial.println("Changed state to ACF_STATE_FLASHING");
                 this->state = ACF_STATE_FLASHING;
-                this->acf_on_flash_ready(msg.data);
+                this->on_flash_ready(msg.data);
             }
 
             break;
@@ -506,7 +517,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
         default:
             // something wrong?
             Serial.print("WARNING: Got unexpected message during ACF_STATE_INIT from MCU: ");
-            Serial.println(this->acf_convert_to_hex_string(msg.data[ACF_CAN_DATA_BYTE_CMD]));
+            Serial.println(this->convert_to_hex_string(msg.data[ACF_CAN_DATA_BYTE_CMD]));
         }
         break;
 
@@ -543,7 +554,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                 Serial.println("%");
             }
 
-            this->acf_on_flash_ready(msg.data);
+            this->on_flash_ready(msg.data);
             break;
 
         case ACF_CMD_START_APP:
@@ -556,7 +567,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
         default:
             // something wrong?
             Serial.print("WARNING: Got unexpected message during ACF_STATE_FLASHING from MCU: ");
-            Serial.println(this->acf_convert_to_hex_string(msg.data[ACF_CAN_DATA_BYTE_CMD]));
+            Serial.println(this->convert_to_hex_string(msg.data[ACF_CAN_DATA_BYTE_CMD]));
         }
         break;
 
@@ -574,7 +585,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
             this->memMapCurrentLine = 0; // set current key to null to begin new key on flash read
             this->memMapCurrentDataIdx = 0;
 
-            this->acf_read_for_verify();
+            this->read_for_verify();
 
             break;
 
@@ -587,14 +598,14 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
             {
                 Serial.println("Got an unexpected address of read data from MCU!");
                 Serial.println("Will now abort and exit the bootloader ...");
-                this->acf_send_start_app();
+                this->send_start_app();
                 return false;
             }
 
             if (!this->printSimpleProgress)
             {
                 Serial.print("Got flash data for ");
-                Serial.print(this->acf_convert_to_hex_string(this->curAddr, 4));
+                Serial.print(this->convert_to_hex_string(this->curAddr, 4));
                 Serial.println(" ...");
             }
 
@@ -618,9 +629,9 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                     if (this->hexMapLines[this->memMapCurrentLine].data[this->memMapCurrentDataIdx] != msg.data[4 + i])
                     {
                         Serial.print("ERROR: Verify failed at ");
-                        Serial.print(this->acf_convert_to_hex_string(this->curAddr));
+                        Serial.print(this->convert_to_hex_string(this->curAddr));
                         Serial.println("! Trying to start the app nevertheless ...");
-                        this->acf_send_start_app();
+                        this->send_start_app();
                         return false;
                     }
                     this->curAddr++;
@@ -644,7 +655,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                     }
                 }
 
-                this->acf_read_for_verify();
+                this->read_for_verify();
             }
             else
             {
@@ -660,7 +671,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                     this->curAddr > this->doRead)
                 {
                     // reached max read address...
-                    this->acf_read_done();
+                    this->read_done();
                     return true;
                 }
                 // request next address
@@ -674,7 +685,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
                     (uint8_t)((this->curAddr >> 8) & 0xFF),
                     (uint8_t)(this->curAddr & 0xFF)};
 
-                this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+                this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
             }
 
             break;
@@ -686,13 +697,13 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
             {
                 // hitting the end at verify must be an error...
                 Serial.println("ERROR: Reading flash failed during verify!");
-                this->acf_send_start_app();
+                this->send_start_app();
                 return false;
             }
             else
             {
                 // when reading whole flash this is expected
-                this->acf_read_done();
+                this->read_done();
             }
         }
         break;
@@ -707,7 +718,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
         {
             // something wrong?
             Serial.print("WARNING: Got unexpected message during ACF_STATE_READING from MCU: ");
-            Serial.println(this->acf_convert_to_hex_string(msg.data[ACF_CAN_DATA_BYTE_CMD]));
+            Serial.println(this->convert_to_hex_string(msg.data[ACF_CAN_DATA_BYTE_CMD]));
         }
         }
         break;
@@ -715,7 +726,7 @@ boolean ACF::acf_handle_can_msg(acf_can_message msg)
     return true;
 }
 
-void ACF::acf_read_for_verify()
+void ACF::read_for_verify()
 {
     // check memory map and get next map key if we reached the end
     if (this->memMapCurrentDataIdx >= this->hexMapLines[this->memMapCurrentLine].byte_count) // all data of the current line was read
@@ -728,7 +739,7 @@ void ACF::acf_read_for_verify()
             Serial.print("Flash and verify done in ");
             Serial.print((float)((millis() - this->flashStartTs) / 1000.0), 1);
             Serial.println(" seconds.");
-            this->acf_send_start_app();
+            this->send_start_app();
             this->verificationFinished = true;
             return;
         }
@@ -757,10 +768,10 @@ void ACF::acf_read_for_verify()
         (uint8_t)((this->curAddr >> 8) & 0xFF),
         (uint8_t)(this->curAddr & 0xFF)};
 
-    this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+    this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
 }
 
-void ACF::acf_read_done()
+void ACF::read_done()
 {
     // create memory map
     /*const memMap = new MemoryMap();
@@ -768,7 +779,7 @@ void ACF::acf_read_done()
     String intelHexString = memMap.asHexString();
 */
 
-    String intelHexString = this->acf_convert_data_array_to_intel_hex_string(this->readDataArr);
+    String intelHexString = this->convert_data_array_to_intel_hex_string(this->readDataArr);
 
     File file = SPIFFS.open(this->file_string, FILE_WRITE);
     if (!file)
@@ -786,10 +797,10 @@ void ACF::acf_read_done()
     Serial.println(" seconds.");
 
     // start the main application at the MCU
-    this->acf_send_start_app();
+    this->send_start_app();
 }
 
-void ACF::acf_send_start_app()
+void ACF::send_start_app()
 {
     Serial.println("Starting the app on the MCU ...");
 
@@ -803,31 +814,31 @@ void ACF::acf_send_start_app()
         0x00,
         0x00};
 
-    this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+    this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
 
     Serial.println("... done.");
 }
 
-void ACF::acf_on_flash_ready(uint8_t msgData[])
+void ACF::on_flash_ready(uint8_t msgData[])
 {
     uint32_t curAddrRemote = msgData[7] + (msgData[6] << 8) + (msgData[5] << 16) + (msgData[4] << 24);
 
     if (!this->printSimpleProgress)
     {
         Serial.print("Remote flash address is: ");
-        Serial.println(acf_convert_to_hex_string(curAddrRemote));
+        Serial.println(convert_to_hex_string(curAddrRemote));
     }
 
     uint8_t dataBytes = 0;
 #ifdef DETAILED_OUTPUT_FLASHING
     Serial.print("memMapCurrentDataIdx: ");
-    Serial.println(acf_convert_to_hex_string(this->memMapCurrentDataIdx));
+    Serial.println(convert_to_hex_string(this->memMapCurrentDataIdx));
     Serial.print("memMapCurrentLine: ");
-    Serial.println(acf_convert_to_hex_string(this->memMapCurrentLine));
+    Serial.println(convert_to_hex_string(this->memMapCurrentLine));
     Serial.print("memMaplinesNum: ");
-    Serial.println(acf_convert_to_hex_string(this->memMaplinesNum));
+    Serial.println(convert_to_hex_string(this->memMaplinesNum));
     Serial.print("this->hexMapLines[this->memMapCurrentLine].byte_count: ");
-    Serial.println(acf_convert_to_hex_string(this->hexMapLines[this->memMapCurrentLine].byte_count));
+    Serial.println(convert_to_hex_string(this->hexMapLines[this->memMapCurrentLine].byte_count));
 #endif
     if (this->memMapCurrentDataIdx >= this->hexMapLines[this->memMapCurrentLine].byte_count)
     {
@@ -861,7 +872,7 @@ void ACF::acf_on_flash_ready(uint8_t msgData[])
                     0x00,
                     0x00};
 
-                this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+                this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
             }
             else
             {
@@ -876,7 +887,7 @@ void ACF::acf_on_flash_ready(uint8_t msgData[])
                     0x00,
                     0x00};
 
-                this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+                this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
             }
             return;
         }
@@ -894,7 +905,7 @@ void ACF::acf_on_flash_ready(uint8_t msgData[])
         if (!this->printSimpleProgress)
         {
             Serial.print("Setting flash address to ");
-            Serial.print(acf_convert_to_hex_string(this->curAddr, 4));
+            Serial.print(convert_to_hex_string(this->curAddr, 4));
             Serial.println("...");
         }
 
@@ -908,7 +919,7 @@ void ACF::acf_on_flash_ready(uint8_t msgData[])
             (uint8_t)((this->curAddr >> 8) & 0xFF),
             (uint8_t)(this->curAddr & 0xFF)};
 
-        this->acf_can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
+        this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
 
         return;
     }
@@ -945,19 +956,25 @@ void ACF::acf_on_flash_ready(uint8_t msgData[])
     if (!this->printSimpleProgress)
     {
         Serial.print("Sending flash data of address ");
-        Serial.print({acf_convert_to_hex_string(this->curAddr, 4)});
+        Serial.print({convert_to_hex_string(this->curAddr, 4)});
         Serial.println("...");
     }
 
-    this->acf_can_send_data(this->can_id_remote_to_mcu, data_var, 8);
+    this->can_send_data(this->can_id_remote_to_mcu, data_var, 8);
 }
 
-String ACF::acf_convert_to_hex_string(uint32_t num)
+/*
+ *  This is a overloaded function to handle numerical values w/o length value.
+ */
+String ACF::convert_to_hex_string(uint32_t num)
 {
-    return this->acf_convert_to_hex_string(num, 0);
+    return this->convert_to_hex_string(num, 0);
 }
 
-String ACF::acf_convert_to_hex_string(uint32_t num, uint8_t minLength)
+/*
+ *  Returns a HEX string based on the passed numerical value.
+ */
+String ACF::convert_to_hex_string(uint32_t num, uint8_t minLength)
 {
     String hex = String(num, HEX);
     if ((hex.length() % 2) != 0)
@@ -976,7 +993,10 @@ String ACF::acf_convert_to_hex_string(uint32_t num, uint8_t minLength)
     return "0x" + hex;
 }
 
-uint32_t ACF::acf_get_device_signature(String partno)
+/*
+ *  Returns the device siganture bytes of the passed device string.
+ */
+uint32_t ACF::get_device_signature(String partno)
 {
     partno.toLowerCase();
     if (partno == "m32" ||
@@ -1022,7 +1042,10 @@ uint32_t ACF::acf_get_device_signature(String partno)
     return 0;
 }
 
-boolean ACF::acf_intel_hex_checksum_is_valid(String line)
+/*
+ *  This returns true if the checksum of the passed intel hex line is valid.
+ */
+boolean ACF::intel_hex_checksum_is_valid(String line)
 {
     line.replace(":", "");
     uint32_t sum = 0;
@@ -1030,7 +1053,7 @@ boolean ACF::acf_intel_hex_checksum_is_valid(String line)
     for (uint8_t i = 0; i < (line.length() / 2); i++)
     {
         String substring = line.substring(i * 2, 2 + (i * 2));
-        uint8_t current_byte = this->acf_convert_hex_string_to_int(substring);
+        uint8_t current_byte = this->convert_hex_string_to_int(substring);
         sum += current_byte;
     }
     // Do simplified checksum verification mentioned here: https://en.wikipedia.org/wiki/Intel_HEX
@@ -1039,19 +1062,25 @@ boolean ACF::acf_intel_hex_checksum_is_valid(String line)
     return (lsb == 0);
 }
 
-uint32_t ACF::acf_convert_hex_string_to_int(String hex_string)
+/*
+ *  Returns the int value of a converted HEX string (e.g. 0xFF1E)
+ */
+uint32_t ACF::convert_hex_string_to_int(String hex_string)
 {
     // Thanks to: https://stackoverflow.com/questions/23576827/arduino-convert-a-string-hex-ffffff-into-3-int
     return (uint32_t)strtol(&hex_string[0], 0, 16);
 }
 
-String ACF::acf_convert_data_array_to_intel_hex_string(uint8_t *readDataArr)
+String ACF::convert_data_array_to_intel_hex_string(uint8_t *readDataArr)
 {
     // TODO!
     return "";
 }
 
-void ACF::acf_can_send_data(uint32_t can_id, String can_data_string, uint8_t data_count)
+/*
+ *  This is a overloaded function to handle CAN data as a string.
+ */
+void ACF::can_send_data(uint32_t can_id, String can_data_string, uint8_t data_count)
 {
     can_data_string.replace("0x", ""); // remove any 0x in the data string
     // lets convert the hex string to an byte array first and then forward it to the overloaded function that can handle the byte array
@@ -1059,45 +1088,79 @@ void ACF::acf_can_send_data(uint32_t can_id, String can_data_string, uint8_t dat
     for (uint8_t i = 0; i < data_count; i++)
     {
         String substring = can_data_string.substring(i * 2, (i * 2) + 2);
-        can_data[i] = acf_convert_hex_string_to_int(substring);
+        can_data[i] = convert_hex_string_to_int(substring);
     }
-    this->acf_can_send_data(can_id, can_data, data_count);
+    this->can_send_data(can_id, can_data, data_count);
 }
 
-void ACF::acf_can_send_data(uint32_t can_id, uint8_t can_data[], uint8_t data_count)
+/*
+ *  This passes the CAN data to the specified function.
+ */
+void ACF::can_send_data(uint32_t can_id, uint8_t can_data[], uint8_t data_count)
 {
     // Passing the can data to send to the function that was specified in the constructor of the library.
     this->can_send_function_pointer(can_id, can_data, data_count);
 }
 
 /*
-*  Returns the duration since the reset request was sent to the target device. This can be used to implement an timeout for a not responding target device.
-*/
-uint32_t ACF::acf_wait_for_bootloader_response_duration()
+ *  Returns the duration since the reset request was sent to the target device. This can be used to implement an timeout for a not responding target device.
+ */
+uint32_t ACF::wait_for_bootloader_response_duration()
 {
     return millis() - this->waitingForBootloaderDuration;
 }
 
 /*
-*  This returns true if the bootloader of the target device responded.
-*/
-boolean ACF::acf_bootloader_responded()
+ *  This returns true if the bootloader of the target device responded.
+ */
+boolean ACF::bootloader_responded()
 {
     return this->flashStartTs != 0;
 }
 
 /*
-*  This returns true if the flash process is finished.
-*/
-boolean ACF::acf_flash_process_finished()
+ *  This returns true if the flash process is finished.
+ */
+boolean ACF::flash_process_finished()
 {
     return this->flashingFinished;
 }
 
 /*
-*  This returns true if the verification process is finished.
-*/
-boolean ACF::acf_verification_finished()
+ *  This returns true if the verification process is finished.
+ */
+boolean ACF::verification_finished()
 {
     return this->verificationFinished;
+}
+
+/*
+ *  This handles all tasks that must be executed checked.
+ */
+void ACF::handle()
+{
+    // Handle ping messages
+    if (this->waitingForBootloaderDuration && this->pingInterval && ((millis() - this->pingLastSend) >= this->pingInterval))
+    {
+        this->pingLastSend = millis();
+        this->ping_message_send();
+    }
+}
+
+/*
+ *  This sends a ping message via CAN.
+ */
+void ACF::ping_message_send()
+{
+    uint8_t can_buffer[8] = {
+        (uint8_t)(this->mcuId >> 8),
+        (uint8_t)this->mcuId,
+        ACF_CMD_PING,
+        0x00,
+        0x00,
+        0x00,
+        0x00,
+        0x00};
+
+    this->can_send_data(this->can_id_remote_to_mcu, can_buffer, 8);
 }

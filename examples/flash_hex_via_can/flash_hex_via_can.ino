@@ -42,17 +42,18 @@ boolean can_new_message = false;
 
 // Here you can define the details about the target that will be flashed
 #define HEX_FILE_NAME "/mcs.hex"        // filename of the hexfile that must be available in the spiffs. Make sure that the "/" is included in the filename 
-#define MCU_ID 0xFF7A                   // id of the mcu which should be spcified in the config of the bootloader
+#define MCU_ID 0x7A                   // id of the mcu which should be specified in the config of the bootloader.
 #define MCU_PART_NO "m328p"             // device string of the target device
-#define CAN_ID_TO_TRIGGER_RESET_OF_MCU 0xFF12
-#define CAN_MESSAGE_TO_TRIGGER_RESET_OF_MCU "0x1122334455667788"
-#define DO_ERASE_BEFORE_FLASHING false
-#define READ_FLASH_CONTENTS_ONLY false //If this is activated the hex contents (of the AVR) will be read and saved to SPIFFS
-#define DO_RESET_BEFORE_FLASHING true
-#define DO_VERIFY_AFTER_FLASHING true
+#define CAN_ID_TO_TRIGGER_RESET_OF_MCU 0x012
+#define CAN_MESSAGE_TO_TRIGGER_RESET_OF_MCU "0x7A"
+#define DO_ERASE_BEFORE_FLASHING false // If this is true the flash contents of the target MCU will be erased before flashing
+#define READ_FLASH_CONTENTS_ONLY false // If this is activated the hex contents (of the AVR) will be read and saved to SPIFFS
+#define DO_RESET_BEFORE_FLASHING true // If this is true the specified CAN message is sent before flashing to trigger an reset of the target MCU. This would activate the bootloader and the flashing process would start without externally triggered reset of the target mcu.
+#define DO_VERIFY_AFTER_FLASHING true // If this is true the flashed contents will be verified after flashing is finished.
 #define FORCE_FLASHING false // if this is activated flashing will be executed even if the read hex file is not valid
-#define CAN_ID_MCU_TO_REMOTE 0x1F1
-#define CAN_ID_REMOTE_TO_MCU 0x1F2
+#define CAN_ID_MCU_TO_REMOTE 0x1F1 // CAN ID that is used to identify CAN messages that are send from the target MCU to the flash app
+#define CAN_ID_REMOTE_TO_MCU 0x1F2 // CAN ID that is used to identify CAN messages that are send from the flash app to the target MCU
+#define PRINT_SIMPLE_PROGRESS_TO_SERIAL true  // If this is true the serial output during is simplified.
 
 void setup()
 {
@@ -73,7 +74,8 @@ void setup()
                       DO_VERIFY_AFTER_FLASHING,
                       FORCE_FLASHING,
                       CAN_ID_REMOTE_TO_MCU,
-                      CAN_ID_MCU_TO_REMOTE);
+                      CAN_ID_MCU_TO_REMOTE,
+                      PRINT_SIMPLE_PROGRESS_TO_SERIAL);
 
   Serial.println("RAM statistics after hex file parsing:");
   print_ram_statistics();
