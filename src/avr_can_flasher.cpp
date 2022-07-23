@@ -142,7 +142,7 @@ boolean ACF::start_flash_process(String file_string,
         }
 
         // prepare buffer and more for reading the data from the spiffs to the string variable intelHexString
-        char buf[ACF_READ_FILE_CHUNK_SIZE];
+        char buf[ACF_READ_FILE_CHUNK_SIZE + 1];
         uint32_t numberOfChunks = ((fileSize % ACF_READ_FILE_CHUNK_SIZE) == 0) ? (fileSize / ACF_READ_FILE_CHUNK_SIZE) : (fileSize / ACF_READ_FILE_CHUNK_SIZE) + 1;
 
 #ifdef DETAILED_OUTPUT_HEX_FILE_READING
